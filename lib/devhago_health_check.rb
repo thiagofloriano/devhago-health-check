@@ -1,26 +1,19 @@
-require 'ostruct'
-require_relative 'devhago_health_check/engine'
 require_relative 'devhago_health_check/version'
+require_relative 'devhago_health_check/configuration'
+require_relative 'devhago_health_check/engine'
 
 module DevhagoHealthCheck
   class << self
-    attr_accessor :config
-  end
+    attr_writer :config
 
-  self.config ||= OpenStruct.new(
-    page_timeout_ms: ENV.fetch('HEALTH_CHECK_PAGE_TIMEOUT_MS', '1000').to_i,
-    cache_window_seconds: ENV.fetch('HEALTH_CHECK_CACHE_WINDOW_SECONDS', '300').to_i,
-    table_name: ENV.fetch('DEVHAGO_HEALTH_CHECK_TABLE', 'health_check_snapshots'),
-    # public_pages can be set to:
-    # - an Array of path strings
-    # - a Proc/lambda that returns an Array
-    # - a Symbol representing a controller/helper method to call on the host app
-    public_pages: nil
-  )
+    def config
+      @config ||= Configuration.new
+    end
 
-  # Configuration DSL: DevhagoHealthCheck.configure do |config|; config.public_pages = ...; end
-  def self.configure
-    yield(config) if block_given?
+    # Configuration DSL: DevhagoHealthCheck.configure do |config|; config.public_pages = ...; end
+    def configure
+      yield(config) if block_given?
+    end
   end
 end
 

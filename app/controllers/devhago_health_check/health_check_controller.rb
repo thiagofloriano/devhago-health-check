@@ -1,11 +1,21 @@
 module DevhagoHealthCheck
   class HealthCheckController < ActionController::Base
+    # Skip CSRF for health check endpoint
+    skip_forgery_protection
+
+    # Authenticate with bearer token if configured
+    before_action :authenticate_health_check
+
     # Minimal engine controller; host app can override behavior or mount under a namespace
     def show
       cache_window = DevhagoHealthCheck.config.cache_window_seconds
+      bypass_cache = params[:bypass_cache].to_s == 'true'
 
-      recent = DevhagoHealthCheck::HealthCheckSnapshot.recent.where('created_at >= ?', cache_window.seconds.ago).first
-      if recent
+      unless bypass_cache
+        recent = DevhagoHealthCheck::HealthCheckSnapshot.recent.where('created_at >= ?',
+                                                                      cache_window.seconds.ago).first
+      end
+      if recent && !bypass_cache
         pages_ok = begin
           recent.public_pages.values.all? { |c| c['ok'] == true }
         rescue StandardError
@@ -63,8 +73,7 @@ module DevhagoHealthCheck
         false
       end
 
-      ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - global_start) * 1000).round
-
+      # Persist snapshot
       snapshot = nil
       begin
         snapshot = DevhagoHealthCheck::HealthCheckSnapshot.create!(public_pages: extract_public_checks(checks),
@@ -156,6 +165,19 @@ module DevhagoHealthCheck
 
     def all_public_pages_ok?(checks)
       checks.any? && checks.select { |k, _| k.to_s.start_with?('public:') }.values.all? { |c| c['ok'] == true }
+    end
+
+    def authenticate_health_check
+      bearer_token = DevhagoHealthCheck.config.bearer_token
+      return if bearer_token.nil? || bearer_token.empty?
+
+      # Extract token from Authorization header
+      auth_header = request.headers['Authorization']
+      provided_token = auth_header&.sub(/^Bearer\s+/, '')
+
+      return if provided_token == bearer_token
+
+      render json: { error: 'Unauthorized' }, status: :unauthorized
     end
   end
 end

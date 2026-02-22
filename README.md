@@ -1,110 +1,369 @@
-# devhago-health-check
+# DevhagoHealthCheck
 
-Uma Rails Engine simples para executar checks de saúde (health check) em aplicações Rails.
+Uma Rails Engine para executar health checks completos em aplicações Rails, com suporte a Docker e deploy em produção.
 
-Objetivo
-- Verificar páginas públicas (renderizadas pela própria app) — com timeout configurável
-- Verificar conectividade com o banco (SELECT 1)
-- Verificar acesso à fila de jobs (campo `jobs` nos snapshots)
-- Persistir snapshots em uma tabela JSONB e retornar um JSON compacto para monitores externos
+## Funcionalidades
 
-Instalação (desenvolvimento local)
+- ✅ **Verificação de páginas públicas** via HTTP real (testa proxy, SSL, DNS completos)
+- ✅ **Verificação de banco de dados** (conectividade e queries)
+- ✅ **Verificação de jobs** (Solid Queue ou outro backend)
+- ✅ **Cache inteligente** de snapshots para evitar sobrecarga
+- ✅ **Autenticação via Bearer Token** (opcional)
+- ✅ **Auto-discovery de rotas** públicas
+- ✅ **Suporte completo a Docker** (desenvolvimento e produção)
 
-1) Adicione a gem via path no Gemfile do seu projeto host:
+## Instalação
 
-   gem 'devhago-health-check', path: '../devhago-health-check'
+### Desenvolvimento Local
 
-2) Instale as gems e rode migrations:
+1. **Adicione a gem no Gemfile:**
 
-   bundle install
-   # com Docker Compose
-   docker compose run --rm app bin/rails db:migrate
+```ruby
+# Use DOCKER_BUILD para detectar builds de produção (setado no Dockerfile)
+gem_path = ENV["DOCKER_BUILD"] == "1" ? "vendor/gems/devhago-health-check" : "../devhago-health-check"
+gem "devhago-health-check", path: gem_path, require: "devhago_health_check"
+```
 
-3) Monte a engine nas suas rotas (exemplo em `config/routes.rb` do host):
+2. **Se usar Docker Compose, adicione volume mount:**
 
-   # monta em / (rota final: /health_check)
-   mount DevhagoHealthCheck::Engine => '/'
+```yaml
+# docker-compose.yml
+services:
+  app:
+    volumes:
+      - ../devhago-health-check:/devhago-health-check
+```
 
-   # ou monta em /internal (rota final: /internal/health_check)
-   # mount DevhagoHealthCheck::Engine => '/internal'
+3. **Instale as dependências:**
 
-Endpoint
-- GET /health_check (ou respectivo prefixo se você montou em outro caminho)
-- Resposta compacta JSON: { pages: "ok"|"fail", db: "ok"|"fail", jobs: "ok"|"fail", ts: "<ISO8601>" }
-- Quando a resposta vier de snapshot em cache (janela configurável), haverá um campo adicional `from_cache: true`.
+```bash
+bundle install
+bin/rails db:migrate
+```
 
-Configuração
+### Produção (Docker/Kamal)
 
-Crie um initializer `config/initializers/devhago_health_check.rb` no seu projeto host e configure conforme necessário.
+1. **Crie script de sync** (`scripts/sync-vendor-gems.sh`):
 
-Exemplo básico (usar valores padrão):
+```bash
+#!/bin/bash
+set -e
 
-   DevhagoHealthCheck.configure do |config|
-     # timeout por página em ms (default: 1000)
-     config.page_timeout_ms = 1000
+echo "📦 Syncing devhago-health-check to vendor/gems..."
 
-     # janela de cache em segundos (default: 300)
-     config.cache_window_seconds = 300
+rm -rf vendor/gems/devhago-health-check
 
-     # nome da tabela que armazena snapshots (padrão: health_check_snapshots)
-     # se quiser isolamento, altere para 'devhago_health_check_snapshots'
-     # mas lembre-se de ajustar migrações/nomes conforme necessário
-     config.table_name = 'health_check_snapshots'
+if [ -d "../devhago-health-check" ]; then
+  cp -r ../devhago-health-check vendor/gems/
+  rm -rf vendor/gems/devhago-health-check/.git
+  echo "✅ Synced devhago-health-check successfully"
+else
+  echo "❌ Error: ../devhago-health-check not found"
+  exit 1
+fi
+```
 
-     # páginas públicas (opcional) — três formas suportadas:
-     # 1) Array de paths (strings):
-     #    config.public_pages = ['/','/about','/pwa.js']
-     # 2) Proc/lambda que retorna um array (será executado no contexto global):
-     #    config.public_pages = -> { ['/','/about'] }
-     # 3) Symbol com o nome de um método que seu app expõe (recomendado para lógica dependente da app):
-     #    config.public_pages = :health_public_pages
-     #    # e em ApplicationController:
-     #    def health_public_pages
-     #      ['/', '/pwa.js']
-     #    end
-   end
+2. **Configure Dockerfile:**
 
-Observações sobre public_pages
-- Se não configurado, a engine faz uma descoberta automática: inspeciona
-  as rotas do host app e seleciona controllers que herdem de
-  `PublicPagesController`, ignorando rotas parametrizadas (com `:id` ou `*`).
-- Recomendo definir explicitamente `public_pages` se sua app tiver regras específicas.
+```dockerfile
+# Base stage - disponível em build e runtime
+ENV RAILS_ENV="production" \
+    DOCKER_BUILD="1" \
+    # ... outras variáveis
 
-Migrações
-- A engine já inclui a migration `db/migrate/*_create_health_check_snapshots.rb`.
-- Após adicionar a gem, rode `bin/rails db:migrate` (ou via Docker Compose) para criar a tabela.
+# Build stage
+FROM base AS build
 
-Rake task
-- Para podas periódicas (reduzir snapshots antigos), use a task:
+# Install gems
+COPY vendor ./vendor
+COPY Gemfile Gemfile.lock ./
 
-   bin/rails devhago_health_check:prune
+# Update Gemfile.lock para usar vendor path
+RUN sed -i 's|remote: \.\./devhago-health-check|remote: vendor/gems/devhago-health-check|g' Gemfile.lock
 
-Segurança
-- Por padrão a engine não aplica autenticação. Em produção, proteja o endpoint com uma
-  regra de rede (internal-only) ou implemente autenticação no host app (por exemplo,
-  um before_action na rota que monta a engine ou via proxy reverso).
+RUN bundle config set --local frozen false && \
+    bundle install
+```
 
-Customização / Extensão
-- Você pode sobrescrever o controller da engine no host app ou criar um controller
-  separado que consulte os métodos do engine se precisar de autenticação/logic custom.
-- Para melhorar testabilidade, recomendo extrair a lógica em um service object
-  caso queira alterar comportamento default aqui.
+3. **Adicione hook do Kamal** (`.kamal/hooks/pre-build`):
 
-Publicação
-- Para usar em múltiplos projetos, publique em um feed privado (git, gem server ou RubyGems).
-- Para desenvolvimento local, use `gem 'devhago-health-check', path: '../devhago-health-check'`.
+```bash
+#!/bin/sh
+set -e
 
-Exemplos rápidos
+echo "🔄 [pre-build] Syncing vendor gems..."
+./scripts/sync-vendor-gems.sh
+echo "✅ [pre-build] Complete"
+```
 
-- Testar localmente:
+## Configuração
 
-  docker compose run --rm app bin/rails db:migrate
-  curl -sS http://localhost:3000/health_check | jq .
+### Monte a Engine nas Rotas
 
-Contribuições / testes
-- A gem ainda precisa de testes automáticos (Minitest). Você pode executar a suíte do host app
-  para validar a integração.
+```ruby
+# config/routes.rb
+begin
+  mount DevhagoHealthCheck::Engine => "/"
+rescue NameError => e
+  Rails.logger.warn("DevhagoHealthCheck engine not available: #{e.message}")
+  # Fallback opcional
+  get "/health_check", to: "health_check_fallback#show"
+end
+```
 
-Contato
-- Para dúvidas/ajustes, responda nesta conversa e eu posso gerar exemplos de código mais
-  específicos para o seu projeto e ajudar a extrair o controller atual para a gem.
+### Configure o Initializer
+
+```ruby
+# config/initializers/devhago_health_check.rb
+if defined?(DevhagoHealthCheck) && DevhagoHealthCheck.respond_to?(:configure)
+  DevhagoHealthCheck.configure do |config|
+    # Timeout por página em milissegundos (padrão: 1000)
+    config.page_timeout_ms = ENV.fetch("HEALTH_CHECK_PAGE_TIMEOUT_MS", 1000).to_i
+    
+    # Janela de cache em segundos (padrão: 300)
+    config.cache_window_seconds = ENV.fetch("HEALTH_CHECK_CACHE_WINDOW_SECONDS", 300).to_i
+    
+    # Nome da tabela (padrão: health_check_snapshots)
+    config.table_name = ENV.fetch("DEVHAGO_HEALTH_CHECK_TABLE", "health_check_snapshots")
+    
+    # Bearer token para autenticação (opcional)
+    config.bearer_token = ENV.fetch("HEALTH_CHECK_BEARER_TOKEN", nil)
+    
+    # Páginas públicas (opcional - usa auto-discovery se não configurado)
+    # config.public_pages = ['/', '/pwa.js', '/manifest.json']
+  end
+else
+  Rails.logger.warn "DevhagoHealthCheck gem not fully loaded yet; initializer skipped"
+end
+```
+
+
+## Uso
+
+### Endpoint
+
+```
+GET /health_check
+```
+
+**Resposta de sucesso:**
+```json
+{
+  "pages": "ok",
+  "db": "ok",
+  "jobs": "ok",
+  "ts": "2026-02-22T22:49:58Z",
+  "from_cache": true
+}
+```
+
+**Resposta com falha:**
+```json
+{
+  "pages": "fail",
+  "db": "ok",
+  "jobs": "ok",
+  "ts": "2026-02-22T22:49:58Z",
+  "from_cache": false
+}
+```
+
+### Autenticação (Opcional)
+
+Se configurado `bearer_token`, envie o header:
+
+```bash
+curl -H "Authorization: Bearer seu-token-secreto" \
+  http://localhost:3000/health_check
+```
+
+Sem o token correto, retorna **401 Unauthorized**.
+
+### Cache Bypass
+
+Para forçar um novo snapshot (ignorando cache):
+
+```bash
+curl http://localhost:3000/health_check?bypass_cache=true
+```
+
+## Configuração de Páginas Públicas
+
+### Auto-Discovery (Padrão)
+
+Se não configurar `public_pages`, a gem descobre automaticamente rotas públicas:
+
+- Controllers que herdam de `PublicPagesController`
+- Rotas GET sem parâmetros (`:id`, `*path`)
+- Ignora rotas de assets (gerenciadas pelo Propshaft/Sprockets)
+
+**Exemplo de rotas descobertas:**
+- `/` (root)
+- `/login`
+- `/pwa.js`
+- `/manifest.json`
+- `/service-worker.js`
+
+### Configuração Manual
+
+```ruby
+DevhagoHealthCheck.configure do |config|
+  # Array estático
+  config.public_pages = ['/', '/about', '/pwa.js']
+  
+  # Ou Proc/Lambda
+  config.public_pages = -> { ['/', '/about'] }
+  
+  # Ou método do controller
+  config.public_pages = :health_public_pages
+end
+```
+
+### ⚠️ Importante sobre Rotas de Assets
+
+**NÃO inclua rotas `/assets/*`** na lista de páginas públicas!
+
+O Propshaft/Sprockets intercepta essas rotas antes do Rails router. Se você precisa testar scripts/manifests, use rotas fora de `/assets/`:
+
+```ruby
+# ❌ NÃO FUNCIONA (interceptado pelo Propshaft)
+get "/assets/pwa.js", to: "pwa#script"
+
+# ✅ FUNCIONA
+get "/pwa.js", to: "pwa#script"
+```
+
+## Como Funciona
+
+### 1. Verificação de Páginas
+
+A gem faz **requisições HTTP reais** para cada página configurada:
+
+```ruby
+# lib/devhago_health_check/health_check_service.rb
+url = URI.join("#{request.scheme}://#{request.host_with_port}", path)
+response = Net::HTTP.get_response(url)
+```
+
+**Por que HTTP real?**
+- Testa o stack completo: proxy, SSL, DNS, routing
+- Detecta problemas de template (ERB errors)
+- Valida headers e content-type corretos
+
+### 2. Verificação de Banco
+
+```ruby
+ActiveRecord::Base.connection.execute("SELECT 1")
+```
+
+### 3. Verificação de Jobs
+
+```ruby
+SolidQueue::Job.count  # ou outro backend
+```
+
+### 4. Snapshot e Cache
+
+- Persiste resultado em `health_check_snapshots` (tabela JSONB)
+- Retorna snapshot recente se dentro da janela de cache
+- Evita sobrecarga em health checks frequentes
+
+## Manutenção
+
+### Poda de Snapshots Antigos
+
+```bash
+# Remove snapshots com mais de 7 dias
+bin/rails devhago_health_check:prune
+
+# Agende via cron/Solid Queue
+```
+
+### Monitoramento
+
+Use serviços como:
+- **UptimeRobot**: Monitora `/health_check` a cada 5 minutos
+- **Datadog**: Synthetic tests
+- **New Relic**: Health check endpoint monitoring
+
+## Troubleshooting
+
+### Erro: "The path `/devhago-health-check` does not exist"
+
+**Causa:** Gemfile.lock aponta para path errado em produção.
+
+**Solução:** Garanta que o Dockerfile tem `ENV DOCKER_BUILD="1"` e rode `sed` para corrigir o Gemfile.lock:
+
+```dockerfile
+RUN sed -i 's|remote: \.\./devhago-health-check|remote: vendor/gems/devhago-health-check|g' Gemfile.lock
+```
+
+### Erro: "undefined method `data` for HealthCheckSnapshot"
+
+**Causa:** Tabela tem campos separados (`public_pages`, `database`, `jobs`), não um campo único `data`.
+
+**Solução:** Rode a migration correta que cria os campos individuais.
+
+### Páginas retornam 404
+
+**Causa:** Rotas `/assets/*` são interceptadas pelo asset pipeline.
+
+**Solução:** Use rotas fora de `/assets/` (ex: `/pwa.js` ao invés de `/assets/pwa.js`).
+
+### Health check muito lento
+
+**Causa:** Muitas páginas sendo testadas ou timeout alto.
+
+**Solução:**
+- Reduza `page_timeout_ms` (padrão: 1000ms)
+- Configure `public_pages` manualmente com menos rotas
+- Aumente `cache_window_seconds` para reduzir frequência de checks
+
+## Desenvolvimento da Gem
+
+### Estrutura
+
+```
+devhago-health-check/
+├── app/
+│   ├── controllers/devhago_health_check/
+│   │   └── health_check_controller.rb
+│   └── models/devhago_health_check/
+│       └── health_check_snapshot.rb
+├── db/migrate/
+│   └── *_create_health_check_snapshots.rb
+├── lib/
+│   ├── devhago_health_check.rb
+│   ├── devhago_health_check/
+│   │   ├── engine.rb
+│   │   └── health_check_service.rb
+│   └── tasks/
+│       └── devhago_health_check_tasks.rake
+└── devhago_health_check.gemspec
+```
+
+### Testes
+
+```bash
+# Na aplicação host
+bin/rails test
+
+# Teste manual
+curl -s http://localhost:3000/health_check | jq .
+```
+
+## Licença
+
+MIT License - veja arquivo LICENSE para detalhes.
+
+## Contribuições
+
+1. Fork o projeto
+2. Crie uma branch (`git checkout -b feature/melhoria`)
+3. Commit suas mudanças (`git commit -am 'Adiciona nova feature'`)
+4. Push para a branch (`git push origin feature/melhoria`)
+5. Abra um Pull Request
+
+## Contato
+
+Para dúvidas ou sugestões, abra uma issue no repositório.

@@ -1,15 +1,26 @@
 require_relative 'lib/devhago_health_check/version'
 
-Gem::Specification.new do |s|
-  s.name        = 'devhago-health-check'
-  s.version     = DevhagoHealthCheck::VERSION
-  s.summary     = 'Health check Rails Engine used by Devhago projects'
-  s.authors     = ['Devhago']
-  s.email       = 'devhago@example.com'
-  s.files       = Dir.chdir(File.expand_path('..', __dir__)) do
-    Dir['lib/**/*', 'app/**/*', 'config/**/*', 'db/**/*', 'templates/**/*']
+Gem::Specification.new do |spec|
+  spec.name        = 'devhago-health-check'
+  spec.version     = DevhagoHealthCheck::VERSION
+  spec.summary     = 'Comprehensive health check Rails Engine with Docker support'
+  spec.description = 'A Rails Engine for health checks with database, jobs, and public pages verification. Supports Docker, bearer token auth, and smart caching.'
+  spec.authors     = ['Devhago']
+  spec.email       = 'devhago@example.com'
+  spec.files       = Dir.chdir(File.expand_path(__dir__)) do
+    Dir['lib/**/*', 'app/**/*', 'config/**/*', 'db/**/*', 'templates/**/*', 'README.md', 'CHANGELOG.md', 'EXAMPLES.md',
+        'LICENSE']
   end
-  s.homepage    = 'https://example.com/devhago-health-check'
-  s.license     = 'MIT'
-  s.add_dependency 'rails', '>= 6.0'
+  spec.homepage    = 'https://github.com/devhago/devhago-health-check'
+  spec.license     = 'MIT'
+  spec.require_paths = ['lib']
+
+  spec.required_ruby_version = '>= 3.0.0'
+  spec.add_dependency 'rails', '>= 6.0'
+
+  spec.metadata = {
+    'source_code_uri' => 'https://github.com/devhago/devhago-health-check',
+    'changelog_uri' => 'https://github.com/devhago/devhago-health-check/blob/main/CHANGELOG.md',
+    'documentation_uri' => 'https://github.com/devhago/devhago-health-check/blob/main/README.md'
+  }
 end
