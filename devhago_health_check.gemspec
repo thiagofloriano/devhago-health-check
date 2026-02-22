@@ -1,3 +1,5 @@
+require_relative 'lib/devhago_health_check/version'
+
 Gem::Specification.new do |s|
   s.name        = 'devhago-health-check'
   s.version     = DevhagoHealthCheck::VERSION

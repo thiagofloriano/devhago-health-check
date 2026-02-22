@@ -1,6 +1,6 @@
 # devhago-health-check
 
-Uma Rails Engine simples para executar checks de saúde (health check) em aplicações Devhago.
+Uma Rails Engine simples para executar checks de saúde (health check) em aplicações Rails.
 
 Objetivo
 - Verificar páginas públicas (renderizadas pela própria app) — com timeout configurável
