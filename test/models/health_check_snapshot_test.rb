@@ -62,7 +62,7 @@ describe DevhagoHealthCheck::HealthCheckSnapshot do
       recent = DevhagoHealthCheck::HealthCheckSnapshot.where('created_at >= ?', cutoff)
 
       assert_includes recent, recent_snapshot
-      assert_not_includes recent, old_snapshot
+      refute_includes recent, old_snapshot
     end
   end
 
