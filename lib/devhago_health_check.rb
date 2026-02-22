@@ -1,6 +1,6 @@
 require 'ostruct'
-require 'devhago_health_check/engine'
-require 'devhago_health_check/version'
+require_relative 'devhago_health_check/engine'
+require_relative 'devhago_health_check/version'
 
 module DevhagoHealthCheck
   class << self
@@ -23,3 +23,5 @@ module DevhagoHealthCheck
     yield(config) if block_given?
   end
 end
+
+require_relative 'devhago_health_check/health_check_service'

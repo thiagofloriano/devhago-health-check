@@ -1,0 +1,6 @@
+source 'https://rubygems.org'
+gem 'minitest'
+gem 'activerecord', '~> 7.0'
+gem 'sqlite3'
+gem 'rake'
+gem 'rack'

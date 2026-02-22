@@ -19,186 +19,10 @@ module DevhagoHealthCheck
         return render body: payload.to_json, content_type: 'application/json; charset=utf-8', status: status
       end
 
-      checks = {}
-      overall_ok = true
-      global_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-
-      page_timeout_ms = DevhagoHealthCheck.config.page_timeout_ms
-
-      # Discover public paths: either from config.public_pages or by inspecting routes
+      # Use HealthCheckService for page checks
       route_infos = resolve_public_route_infos
-
-      route_infos.each do |route_info|
-        path = route_info[:path]
-        controller_class = route_info[:controller]
-        action = route_info[:action]
-        key = "public:#{path}"
-        start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-        begin
-          host_with_port = begin
-            request.host_with_port
-          rescue StandardError
-            'localhost'
-          end
-          scheme = request.ssl? ? 'https' : 'http'
-
-          accept = if path.end_with?('.js') || path.include?('service-worker') || path.include?('/assets/pwa') || path == '/pwa.js'
-                     'application/javascript'
-                   elsif path.end_with?('.json') || path.include?('manifest.json') || path.include?('pwa_manifest.json')
-                     'application/json'
-                   else
-                     request.headers['Accept'] || 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
-                   end
-
-          detected_format = if path.end_with?('.js') || path.include?('service-worker') || path.include?('/assets/pwa') || path == '/pwa.js'
-                              :js
-                            elsif path.end_with?('.json') || path.include?('manifest.json') || path.include?('pwa_manifest.json')
-                              :json
-                            end
-
-          if detected_format && controller_class && action
-            begin
-              renderer_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-              template = "#{controller_class.controller_path}/#{action}"
-              ApplicationController.render(template: template, formats: [detected_format], http_host: host_with_port)
-              renderer_elapsed = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - renderer_start) * 1000).round
-              elapsed_ms = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - start) * 1000).round
-              ok = elapsed_ms <= page_timeout_ms
-              checks[key] = { status: 'render_ok', ok: ok, elapsed_ms: elapsed_ms }
-              checks[key][:renderer_fallback] = { ok: ok, elapsed_ms: renderer_elapsed }
-              overall_ok &&= ok
-              next
-            rescue StandardError => _e
-              # fallthrough
-            end
-          end
-
-          env = Rack::MockRequest.env_for(path,
-                                          method: 'GET',
-                                          'HTTP_HOST' => host_with_port,
-                                          'SERVER_NAME' => begin
-                                            request.server_name
-                                          rescue StandardError
-                                            nil
-                                          end,
-                                          'SERVER_PORT' => begin
-                                            request.server_port.to_s
-                                          rescue StandardError
-                                            nil
-                                          end,
-                                          'rack.url_scheme' => scheme,
-                                          'REMOTE_ADDR' => begin
-                                            request.remote_ip
-                                          rescue StandardError
-                                            '127.0.0.1'
-                                          end,
-                                          'HTTP_ACCEPT' => accept,
-                                          'HTTP_USER_AGENT' => request.user_agent || 'DevhagoHealthCheck/1.0')
-
-          if detected_format
-            begin
-              mime = Mime::Type.lookup_by_extension(detected_format.to_s)
-              env['action_dispatch.request.formats'] = [mime] if mime
-              env['HTTP_ACCEPT'] = mime.to_s if mime
-            rescue StandardError => _e
-            end
-          end
-
-          status, _, body = Rails.application.call(env)
-          if status.to_i >= 400 && controller_class && action && controller_class.respond_to?(:action)
-            begin
-              status, _, body = controller_class.action(action).call(env)
-            rescue StandardError => _e
-            end
-          end
-
-          body_snippet = nil
-          begin
-            collected = ''
-            body.each do |part|
-              collected << part.to_s
-              break if collected.length > 1024
-            end
-            body_snippet = collected
-          rescue StandardError => _e
-            body_snippet = nil
-          ensure
-            body.close if body.respond_to?(:close)
-          end
-
-          elapsed_ms = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - start) * 1000).round
-          ok = status.to_i.between?(200, 399) && elapsed_ms <= page_timeout_ms
-          checks[key] = { status: status.to_i, ok: ok, elapsed_ms: elapsed_ms }
-          checks[key][:body_snippet] = body_snippet if !ok && body_snippet.present?
-
-          if status.to_i == 403 && controller_class
-            begin
-              renderer_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-              template = "#{controller_class.controller_path}/#{action}"
-              ApplicationController.render(template: template, http_host: host_with_port)
-              renderer_elapsed = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - renderer_start) * 1000).round
-              checks[key][:renderer_fallback] = { ok: true, elapsed_ms: renderer_elapsed }
-              checks[key][:ok] = true
-              overall_ok &&= true
-            rescue StandardError => _e
-            end
-          end
-
-          overall_ok &&= ok
-        rescue StandardError => e
-          elapsed_ms = begin
-            ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - start) * 1000).round
-          rescue StandardError
-            nil
-          end
-          if controller_class
-            begin
-              format = if path.end_with?('.js') || path.include?('service-worker') || path.include?('/assets/pwa') || path == '/pwa.js'
-                         :js
-                       elsif path.end_with?('.json') || path.include?('manifest.json') || path.include?('pwa_manifest.json')
-                         :json
-                       else
-                         :html
-                       end
-
-              renderer_start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-              template = "#{controller_class.controller_path}/#{action}"
-              ApplicationController.render(template: template, formats: [format], handlers: [:erb], layout: false,
-                                           http_host: host_with_port)
-              renderer_elapsed = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - renderer_start) * 1000).round
-              ok = elapsed_ms && elapsed_ms <= page_timeout_ms
-              checks[key] = { status: 'render_ok', ok: ok, elapsed_ms: elapsed_ms }
-              checks[key][:renderer_fallback] = { ok: ok, elapsed_ms: renderer_elapsed }
-              overall_ok &&= ok
-            rescue StandardError => re
-              begin
-                specific_file = Rails.root.join('app', 'views', controller_class.controller_path,
-                                                "#{action}.#{format}.erb")
-                if File.exist?(specific_file)
-                  renderer_start2 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-                  ApplicationController.render(file: specific_file.to_s, layout: false, http_host: host_with_port)
-                  renderer_elapsed2 = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - renderer_start2) * 1000).round
-                  ok = elapsed_ms && elapsed_ms <= page_timeout_ms
-                  checks[key] = { status: 'render_ok', ok: ok, elapsed_ms: elapsed_ms }
-                  checks[key][:renderer_fallback] = { ok: ok, elapsed_ms: renderer_elapsed2, file: specific_file.to_s }
-                  overall_ok &&= ok
-                else
-                  checks[key] = { status: 'error', ok: false, message: e.message, elapsed_ms: elapsed_ms }
-                  checks[key][:renderer_error] = re.message
-                  overall_ok = false
-                end
-              rescue StandardError => re2
-                checks[key] = { status: 'error', ok: false, message: e.message, elapsed_ms: elapsed_ms }
-                checks[key][:renderer_error] = "#{re.message}; fallback: #{re2.message}"
-                overall_ok = false
-              end
-            end
-          else
-            checks[key] = { status: 'error', ok: false, message: e.message, elapsed_ms: elapsed_ms }
-            overall_ok = false
-          end
-        end
-      end
+      service = DevhagoHealthCheck::HealthCheckService.new(self)
+      checks = service.check_pages(route_infos)
 
       # Database connectivity
       begin
@@ -215,7 +39,7 @@ module DevhagoHealthCheck
           nil
         end
         checks['database'] = { ok: false, message: e.message, elapsed_ms: db_elapsed }
-        overall_ok = false
+        false
       end
 
       # Jobs check (formerly SolidQueue)
@@ -236,7 +60,7 @@ module DevhagoHealthCheck
           nil
         end
         checks['jobs'] = { ok: false, message: e.message, elapsed_ms: jobs_elapsed }
-        overall_ok = false
+        false
       end
 
       ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - global_start) * 1000).round
