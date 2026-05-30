@@ -16,7 +16,7 @@ module DevhagoHealthCheck
       (jobs || {})['ok'] == true ? 'ok' : 'fail'
     end
 
-    def self.prune_old!(hours = 24)
+    def self.prune_old!(hours = DevhagoHealthCheck.config.snapshot_retention_hours)
       where('created_at < ?', hours.hours.ago).delete_all
     end
   end

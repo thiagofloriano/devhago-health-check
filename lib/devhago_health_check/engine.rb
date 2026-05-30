@@ -24,7 +24,7 @@ module DevhagoHealthCheck
     end
 
     initializer 'devhago_health_check.append_migrations' do |app|
-      unless app.root.to_s.match(root.to_s)
+      unless app.root.to_s.start_with?(root.to_s)
         config.paths['db/migrate'].expanded.each do |path|
           app.config.paths['db/migrate'] << path
         end

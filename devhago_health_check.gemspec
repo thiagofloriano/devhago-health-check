@@ -11,7 +11,7 @@ Gem::Specification.new do |spec|
     Dir['lib/**/*', 'app/**/*', 'config/**/*', 'db/**/*', 'templates/**/*', 'README.md', 'CHANGELOG.md', 'EXAMPLES.md',
         'LICENSE']
   end
-  spec.homepage    = 'https://github.com/devhago/devhago-health-check'
+  spec.homepage    = 'https://github.com/thiagofloriano/devhago-health-check'
   spec.license     = 'MIT'
   spec.require_paths = ['lib']
 
@@ -19,8 +19,9 @@ Gem::Specification.new do |spec|
   spec.add_dependency 'rails', '>= 6.0'
 
   spec.metadata = {
-    'source_code_uri' => 'https://github.com/devhago/devhago-health-check',
-    'changelog_uri' => 'https://github.com/devhago/devhago-health-check/blob/main/CHANGELOG.md',
-    'documentation_uri' => 'https://github.com/devhago/devhago-health-check/blob/main/README.md'
+    'source_code_uri' => 'https://github.com/thiagofloriano/devhago-health-check',
+    'changelog_uri' => 'https://github.com/thiagofloriano/devhago-health-check/blob/main/CHANGELOG.md',
+    'documentation_uri' => 'https://github.com/thiagofloriano/devhago-health-check/blob/main/README.md',
+    'rubygems_mfa_required' => 'true'
   }
 end

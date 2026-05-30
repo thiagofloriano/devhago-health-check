@@ -5,6 +5,35 @@ Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/),
 e este projeto adere ao [Semantic Versioning](https://semver.org/lang/pt-BR/).
 
+## [0.3.0] - 2026-05-30
+
+### Adicionado
+- Opção de configuração `check_jobs` (`:auto` / `true` / `false`) para controlar a verificação de jobs
+- Opção de configuração `snapshot_retention_hours` (padrão: 168h / 7 dias) usada por `prune_old!`
+- Variáveis de ambiente `HEALTH_CHECK_JOBS` e `HEALTH_CHECK_RETENTION_HOURS`
+- Arquivo `LICENSE` (MIT), referenciado pela gemspec e README
+- Testes para as novas opções de configuração e para `prune_old!`
+
+### Corrigido
+- **Jobs check não derruba mais apps sem Solid Queue**: no modo `:auto`, quando
+  nenhum backend de jobs é detectado, a verificação é marcada como `ok` (skipped)
+  em vez de retornar `503`
+- **Generator `install` quebrado**: removida a cópia de migration inexistente que
+  fazia `rails g devhago_health_check:install` falhar; a migration da engine já é
+  anexada automaticamente aos paths do app host
+- **Auto-discovery**: quando `PublicPagesController` não está definido, nenhuma rota
+  é descoberta (antes, todas as rotas GET eram incluídas por engano)
+- `prune_old!` agora respeita `snapshot_retention_hours` (antes fixo em 24h, em
+  desacordo com a documentação que dizia 7 dias)
+- Comparação de Bearer token agora é constant-time (`ActiveSupport::SecurityUtils.secure_compare`)
+- Engine: `start_with?` em vez de `match` ao comparar paths de migration
+- Payload sem cache agora inclui `from_cache: false` (consistente com o README)
+
+### Alterado
+- Verificações de banco e jobs extraídas para métodos privados no controller,
+  removendo duplicação de medição de tempo e tratamento de erros
+- Metadados da gemspec apontam para o repositório correto
+
 ## [0.2.0] - 2026-02-22
 
 ### Adicionado

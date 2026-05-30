@@ -125,7 +125,16 @@ if defined?(DevhagoHealthCheck) && DevhagoHealthCheck.respond_to?(:configure)
     
     # Nome da tabela (padrão: health_check_snapshots)
     config.table_name = ENV.fetch("DEVHAGO_HEALTH_CHECK_TABLE", "health_check_snapshots")
-    
+
+    # Retenção de snapshots em horas, usada por prune_old! (padrão: 168 = 7 dias)
+    config.snapshot_retention_hours = ENV.fetch("HEALTH_CHECK_RETENTION_HOURS", 168).to_i
+
+    # Verificação de jobs:
+    #   :auto  -> verifica Solid Queue quando presente, ignora se não houver backend (padrão)
+    #   true   -> exige um backend de jobs (falha se ausente)
+    #   false  -> nunca verifica jobs
+    # config.check_jobs = :auto
+
     # Bearer token para autenticação (opcional)
     config.bearer_token = ENV.fetch("HEALTH_CHECK_BEARER_TOKEN", nil)
     
@@ -259,8 +268,13 @@ ActiveRecord::Base.connection.execute("SELECT 1")
 ### 3. Verificação de Jobs
 
 ```ruby
-SolidQueue::Job.count  # ou outro backend
+SolidQueue::Job.where(finished_at: nil).limit(1).count  # ou outro backend
 ```
+
+No modo padrão (`check_jobs = :auto`), se nenhum backend de jobs for detectado
+(sem `SolidQueue` e sem a tabela `solid_queue_jobs`), a verificação é marcada
+como `ok` (skipped) em vez de falhar — assim apps sem Solid Queue não recebem
+`503`. Use `check_jobs = true` para exigir um backend, ou `false` para desativar.
 
 ### 4. Snapshot e Cache
 

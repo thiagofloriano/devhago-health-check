@@ -13,6 +13,8 @@ describe DevhagoHealthCheck::Configuration do
       config.table_name = @original_config.table_name
       config.bearer_token = @original_config.bearer_token
       config.public_pages = @original_config.public_pages
+      config.check_jobs = @original_config.check_jobs
+      config.snapshot_retention_hours = @original_config.snapshot_retention_hours
     end
   end
 
@@ -40,6 +42,16 @@ describe DevhagoHealthCheck::Configuration do
     it 'has nil public_pages by default (auto-discovery)' do
       config = DevhagoHealthCheck::Configuration.new
       assert_nil config.public_pages
+    end
+
+    it 'defaults check_jobs to :auto' do
+      config = DevhagoHealthCheck::Configuration.new
+      assert_equal :auto, config.check_jobs
+    end
+
+    it 'defaults snapshot_retention_hours to 168 (7 days)' do
+      config = DevhagoHealthCheck::Configuration.new
+      assert_equal 168, config.snapshot_retention_hours
     end
   end
 
@@ -100,6 +112,38 @@ describe DevhagoHealthCheck::Configuration do
       end
 
       assert_equal :custom_public_pages, DevhagoHealthCheck.config.public_pages
+    end
+
+    it 'allows disabling the jobs check' do
+      DevhagoHealthCheck.configure do |config|
+        config.check_jobs = false
+      end
+
+      assert_equal false, DevhagoHealthCheck.config.check_jobs
+    end
+
+    it 'allows setting snapshot_retention_hours' do
+      DevhagoHealthCheck.configure do |config|
+        config.snapshot_retention_hours = 48
+      end
+
+      assert_equal 48, DevhagoHealthCheck.config.snapshot_retention_hours
+    end
+  end
+
+  describe 'dup' do
+    it 'copies all attributes including check_jobs and retention' do
+      DevhagoHealthCheck.configure do |config|
+        config.check_jobs = false
+        config.snapshot_retention_hours = 72
+        config.bearer_token = 'abc'
+      end
+
+      duped = DevhagoHealthCheck.config.dup
+
+      assert_equal false, duped.check_jobs
+      assert_equal 72, duped.snapshot_retention_hours
+      assert_equal 'abc', duped.bearer_token
     end
   end
 

@@ -94,6 +94,30 @@ describe DevhagoHealthCheck::HealthCheckSnapshot do
 
       assert_equal 2, DevhagoHealthCheck::HealthCheckSnapshot.count
     end
+
+    it 'prune_old! uses the configured retention window by default' do
+      DevhagoHealthCheck::HealthCheckSnapshot.create!(created_at: 10.days.ago)
+      DevhagoHealthCheck::HealthCheckSnapshot.create!(created_at: 1.hour.ago)
+
+      original = DevhagoHealthCheck.config.snapshot_retention_hours
+      begin
+        DevhagoHealthCheck.config.snapshot_retention_hours = 168 # 7 days
+        DevhagoHealthCheck::HealthCheckSnapshot.prune_old!
+      ensure
+        DevhagoHealthCheck.config.snapshot_retention_hours = original
+      end
+
+      assert_equal 1, DevhagoHealthCheck::HealthCheckSnapshot.count
+    end
+
+    it 'prune_old! accepts an explicit retention window' do
+      DevhagoHealthCheck::HealthCheckSnapshot.create!(created_at: 3.hours.ago)
+      DevhagoHealthCheck::HealthCheckSnapshot.create!(created_at: 10.minutes.ago)
+
+      DevhagoHealthCheck::HealthCheckSnapshot.prune_old!(1) # older than 1 hour
+
+      assert_equal 1, DevhagoHealthCheck::HealthCheckSnapshot.count
+    end
   end
 
   describe 'data integrity' do

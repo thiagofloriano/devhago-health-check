@@ -34,44 +34,8 @@ module DevhagoHealthCheck
       service = DevhagoHealthCheck::HealthCheckService.new(self)
       checks = service.check_pages(route_infos)
 
-      # Database connectivity
-      begin
-        start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-        ActiveRecord::Base.connection_pool.with_connection do |conn|
-          conn.execute('SELECT 1')
-        end
-        db_elapsed = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - start) * 1000).round
-        checks['database'] = { ok: true, elapsed_ms: db_elapsed }
-      rescue StandardError => e
-        db_elapsed = begin
-          ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - start) * 1000).round
-        rescue StandardError
-          nil
-        end
-        checks['database'] = { ok: false, message: e.message, elapsed_ms: db_elapsed }
-        false
-      end
-
-      # Jobs check (formerly SolidQueue)
-      begin
-        start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-        if defined?(SolidQueue::Job)
-          sample = SolidQueue::Job.where(finished_at: nil).limit(1).count
-        else
-          ActiveRecord::Base.connection.execute('SELECT 1 FROM solid_queue_jobs LIMIT 1')
-          sample = 0
-        end
-        jobs_elapsed = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - start) * 1000).round
-        checks['jobs'] = { ok: true, elapsed_ms: jobs_elapsed, sample: sample }
-      rescue StandardError => e
-        jobs_elapsed = begin
-          ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - start) * 1000).round
-        rescue StandardError
-          nil
-        end
-        checks['jobs'] = { ok: false, message: e.message, elapsed_ms: jobs_elapsed }
-        false
-      end
+      checks['database'] = check_database_health
+      checks['jobs'] = check_jobs_health
 
       # Persist snapshot
       snapshot = nil
@@ -94,12 +58,50 @@ module DevhagoHealthCheck
       end
 
       payload = { pages: (pages_ok ? 'ok' : 'fail'), db: (db_ok ? 'ok' : 'fail'), jobs: (jobs_ok ? 'ok' : 'fail'),
-                  ts: (snapshot ? snapshot.created_at.utc.iso8601 : Time.now.utc.iso8601) }
+                  ts: (snapshot ? snapshot.created_at.utc.iso8601 : Time.now.utc.iso8601), from_cache: false }
       status_code = pages_ok && db_ok && jobs_ok ? :ok : :service_unavailable
       render body: payload.to_json, content_type: 'application/json; charset=utf-8', status: status_code
     end
 
     private
+
+    def elapsed_ms_since(start)
+      ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - start) * 1000).round
+    end
+
+    def check_database_health
+      start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      ActiveRecord::Base.connection_pool.with_connection do |conn|
+        conn.execute('SELECT 1')
+      end
+      { ok: true, elapsed_ms: elapsed_ms_since(start) }
+    rescue StandardError => e
+      { ok: false, message: e.message, elapsed_ms: elapsed_ms_since(start) }
+    end
+
+    def check_jobs_health
+      mode = DevhagoHealthCheck.config.check_jobs
+      return { ok: true, skipped: true, message: 'jobs check disabled' } if mode == false
+
+      start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      if defined?(SolidQueue::Job)
+        sample = SolidQueue::Job.where(finished_at: nil).limit(1).count
+        { ok: true, elapsed_ms: elapsed_ms_since(start), sample: sample }
+      elsif mode == :auto && !solid_queue_table_present?
+        { ok: true, skipped: true, message: 'no job backend detected' }
+      else
+        ActiveRecord::Base.connection.execute('SELECT 1 FROM solid_queue_jobs LIMIT 1')
+        { ok: true, elapsed_ms: elapsed_ms_since(start), sample: 0 }
+      end
+    rescue StandardError => e
+      { ok: false, message: e.message, elapsed_ms: elapsed_ms_since(start) }
+    end
+
+    def solid_queue_table_present?
+      ActiveRecord::Base.connection.table_exists?('solid_queue_jobs')
+    rescue StandardError
+      false
+    end
 
     def resolve_public_pages
       cfg = DevhagoHealthCheck.config.public_pages
@@ -138,10 +140,15 @@ module DevhagoHealthCheck
 
         next unless controller_class.is_a?(Class)
 
+        # Only auto-discover pages whose controller inherits from the host
+        # app's PublicPagesController. If that base class is not defined we
+        # cannot safely guess which routes are public, so discover nothing.
+        next unless defined?(PublicPagesController)
+
         begin
           next unless controller_class < PublicPagesController
         rescue StandardError
-          false
+          next
         end
 
         raw_path = route.path.spec.to_s
@@ -175,7 +182,10 @@ module DevhagoHealthCheck
       auth_header = request.headers['Authorization']
       provided_token = auth_header&.sub(/^Bearer\s+/, '')
 
-      return if provided_token == bearer_token
+      # Constant-time comparison to avoid leaking the token via timing
+      if provided_token && ActiveSupport::SecurityUtils.secure_compare(provided_token, bearer_token)
+        return
+      end
 
       render json: { error: 'Unauthorized' }, status: :unauthorized
     end

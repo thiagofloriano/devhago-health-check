@@ -14,6 +14,20 @@ DevhagoHealthCheck.configure do |config|
   # If you want isolation, change to something like 'devhago_health_check_snapshots'
   config.table_name = ENV.fetch('DEVHAGO_HEALTH_CHECK_TABLE', 'health_check_snapshots')
 
+  # How long persisted snapshots are kept, in hours, before `prune_old!`
+  # removes them. Default: 168 (7 days).
+  config.snapshot_retention_hours = ENV.fetch('HEALTH_CHECK_RETENTION_HOURS', 168).to_i
+
+  # Background jobs check. Values:
+  #   :auto  -> check Solid Queue when present, skip gracefully when no backend exists (default)
+  #   true   -> always require a job backend (report fail if missing)
+  #   false  -> never check jobs (always reported as ok)
+  # config.check_jobs = :auto
+
+  # Bearer token to protect the endpoint. When set, requests must send
+  # `Authorization: Bearer <token>`. Default: nil (no auth).
+  # config.bearer_token = ENV.fetch('HEALTH_CHECK_BEARER_TOKEN', nil)
+
   # public_pages can be:
   # - an Array of paths
   # - a Proc/lambda returning an Array

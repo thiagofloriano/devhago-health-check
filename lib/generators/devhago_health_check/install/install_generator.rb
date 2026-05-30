@@ -1,26 +1,30 @@
 require 'rails/generators'
-require 'rails/generators/migration'
 
 module DevhagoHealthCheck
   module Generators
     class InstallGenerator < Rails::Generators::Base
-      include Rails::Generators::Migration
-
       source_root File.expand_path('templates', __dir__)
 
-      desc 'Copies the DevhagoHealthCheck initializer and (optionally) migrations to the host application.'
+      desc 'Copies the DevhagoHealthCheck initializer to the host application. ' \
+           'The engine migration is appended to the host migration paths automatically, ' \
+           'so you only need to run `rails db:migrate` afterwards.'
 
       def copy_initializer
         template 'devhago_health_check_initializer.rb', 'config/initializers/devhago_health_check.rb'
       end
 
-      def copy_migrations
-        migration_template 'create_health_check_snapshots.rb', 'db/migrate/create_health_check_snapshots.rb'
-      end
+      def show_post_install_message
+        say <<~MSG
+          DevhagoHealthCheck installed.
 
-      # Implement the required interface for migration_template
-      def self.next_migration_number(_dirname)
-        Time.now.utc.strftime('%Y%m%d%H%M%S')
+          Next steps:
+            1. Mount the engine in config/routes.rb:
+                 mount DevhagoHealthCheck::Engine => "/"
+            2. Run the migration:
+                 bin/rails db:migrate
+            3. Hit the endpoint:
+                 curl http://localhost:3000/health_check
+        MSG
       end
     end
   end
